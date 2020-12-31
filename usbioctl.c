@@ -29,7 +29,8 @@
 
 /*
  * USB-IO(1.0) commands (not complete list)
- *   see: https://web.archive.org/web/20070922153407/http://www.fexx.org/usbio/spec-ja.html
+ *   see: https://web.archive.org/web/20070922153407/ \
+ *     http://www.fexx.org/usbio/spec-ja.html
  */
 
 #define USBIO_WRITE_PORT0	0x01
@@ -37,7 +38,12 @@
 #define USBIO_READ_PORT0	0x03
 #define USBIO_READ_PORT1	0x04
 
-#define USBIO_PORT1_MASK	0xf0
+/*
+ * USB-IO(2.0) commands (not complete list)
+ */
+#define USBIO2_RW		0x20
+
+#define USBIO_PORT1_MASK	0x0f
 
 #define DEBUG
 #ifdef DEBUG
@@ -50,20 +56,23 @@
 struct {
 	uint16_t	vendor;
 	uint16_t	product;
+	int		protocol_version;	/* protocol version */
 } usbio_models [] = {
-	0x0bfe, 0x1003,		/* Morphy Planning */
-	0x1352, 0x0100,		/* Km2Net */
+	0x0bfe, 0x1003, 1,	/* Morphy Planning USB-IO 1.0 */
+	0x1352, 0x0100, 1,	/* Km2Net USB-IO 1.0 */
+	0x1352, 0x0120, 2,	/* Km2Net USB-IO 2.0 */
+	0x1352, 0x0121, 2,	/* Km2Net USB-IO 2.0(AKI) */
 };
 
 /* prototypes */
 int usbio_open(void);
 int usbio_check(int);
-int usbio_read(int, int, unsigned char *);
-int usbio_write(int, int, unsigned char *);
+int usbio_write1(int, int, unsigned char *);
+int usbio_write2(int, int, unsigned char *);
 
 /*
  * check vendor/product IDs on an opened file descriptor
- *   return the index of product list (>= 0) if found
+ *   return its protocol version (1 or 2) if found
  *   return -1 if not found
  */
 int
@@ -82,7 +91,7 @@ usbio_check(int fd) {
 	for (i = 0; i < n; i++)
 		if ((udi.udi_vendorNo == usbio_models[i].vendor) &&
 			(udi.udi_productNo == usbio_models[i].product))
-				return i;
+				return usbio_models[i].protocol_version;
 
 	return -1;	/* not match */
 }
@@ -111,33 +120,14 @@ usbio_open(void) {
 	exit(1);
 }
 
+/*
+ * protocol version 1
+ */
 int
-usbio_read(int fd, int port, unsigned char *data) {
-	int ret;
-	unsigned char buf[8];
-
-	buf[0] = (port == 0 ? USBIO_READ_PORT0 : USBIO_READ_PORT1);
-	ret = write(fd, buf, 8);
-	if (ret == -1)
-		err(1, "write");
-
-	ret = read(fd, buf, 8);
-	if (ret == -1)
-		err(1, "read");
-	else if (ret != 0) {
-		DPRINTF("read : %02x %02x %02x %02x %02x %02x %02x %02x\n",
-			buf[0], buf[1], buf[2], buf[3],
-			buf[4], buf[5], buf[6], buf[7]);
-	}
-	*data = buf[1];
-	return ret;
-}
-
-int
-usbio_write(int fd, int port, unsigned char *data) {
+usbio_write1(int fd, int port, unsigned char *data) {
 	static unsigned char seq = 0;
 	int ret;
-	unsigned char buf[8];
+	unsigned char buf[64];
 
 	buf[0] = (port == 0 ? USBIO_WRITE_PORT0 : USBIO_WRITE_PORT1);
 	buf[1] = *data;
@@ -147,7 +137,7 @@ usbio_write(int fd, int port, unsigned char *data) {
 	if (ret == -1)
 		err(1, "write");
 	else if (ret != 0) {
-		DPRINTF("wrote: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+		DPRINTF("write: %02x:%02x %02x %02x %02x %02x %02x:%02x\n",
 			buf[0], buf[1], buf[2], buf[3],
 			buf[4], buf[5], buf[6], buf[7]);
 	}
@@ -165,7 +155,7 @@ usbio_write(int fd, int port, unsigned char *data) {
 		if (ret == 0)
 			break;
 		if (buf[7] == seq) {
-			DPRINTF("read : %02x %02x %02x %02x %02x %02x %02x %02x\n",
+			DPRINTF("read : %02x:%02x %02x %02x %02x %02x %02x:%02x\n",
 				buf[0], buf[1], buf[2], buf[3],
 				buf[4], buf[5], buf[6], buf[7]);
 			break;
@@ -176,27 +166,88 @@ usbio_write(int fd, int port, unsigned char *data) {
 	return ret;
 }
 
+/*
+ * protocol version 2
+ */
+int
+usbio_write2(int fd, int port, unsigned char *data) {
+	static unsigned char seq = 0;
+	int ret;
+	unsigned char buf[64];
+
+	buf[0] = USBIO2_RW;
+	buf[1] = (unsigned char)(port + 1);
+	buf[2] = *data;
+	buf[3] = buf[4] = buf[5] = buf[6] = buf[7] = buf[8] = 0;
+	buf[63] = seq;
+
+	ret = write(fd, buf, 64);
+	if (ret == -1)
+		err(1, "write");
+	else if (ret != 0) {
+		DPRINTF("write: %02x:%02x %02x %02x %02x"
+			" %02x %02x %02x %02x:%02x\n",
+			buf[0], buf[1], buf[2], buf[3], buf[4],
+			buf[5], buf[6], buf[7], buf[8], buf[63]);
+	}
+
+	for(;;) {
+		ret = read(fd, buf, 64);
+		if (ret == -1)
+			err(1, "read");
+		if (ret == 0)
+			break;
+		if (buf[63] == seq) {
+			DPRINTF("read : %02x:%02x %02x %02x %02x"
+				" %02x %02x %02x %02x:%02x\n",
+				buf[0], buf[1], buf[2], buf[3], buf[4],
+				buf[5], buf[6], buf[7], buf[8], buf[63]);
+			break;
+		}
+	}
+
+	seq++;
+	return ret;
+}
+
 int port = 1;
 
+/*
+ * main
+ */
 int
 main(int argc, char *argv[]) {
 	int fd, ret;
-	uint8_t data;
+	unsigned char data;
+
+	if (argc != 2) {
+		fprintf(stderr, "need output data\n");
+		exit(1);
+	}
+
+	data = (unsigned char)atoi(argv[1]);	/* XXX: error check! */
 
 	fd = usbio_open();
 
-	/* read current status */
-	usbio_read(fd, port, &data);
-
 	/* write */
-	data = (char)(0x0d | USBIO_PORT1_MASK);
-	usbio_write(fd, port, &data);
+	data = data & USBIO_PORT1_MASK;
+#if 0
+	data = ~data;
+	usbio_write1(fd, port, &data);
+#else
+	usbio_write2(fd, port, &data);
+#endif
 
-	sleep(1);	/* wait for 1 second */
+	sleep(3);	/* wait for 3 second */
 
 	/* write again */
-	data = (char)(0x0f | USBIO_PORT1_MASK);
-	usbio_write(fd, port, &data);
+	data = 0x00 & USBIO_PORT1_MASK;
+#if 0
+	data = ~data;
+	usbio_write1(fd, port, &data);
+#else
+	usbio_write2(fd, port, &data);
+#endif
 
 	close(fd);
 	exit(0);
