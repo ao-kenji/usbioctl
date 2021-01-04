@@ -64,6 +64,9 @@ struct {
 	0x1352, 0x0121, 2,	/* Km2Net USB-IO 2.0(AKI) */
 };
 
+/* global variables */
+unsigned char seqno = 0;
+
 /* prototypes */
 int usbio_open(void);
 int usbio_check(int);
@@ -125,13 +128,12 @@ usbio_open(void) {
  */
 int
 usbio_write1(int fd, int port, unsigned char *data) {
-	static unsigned char seq = 0;
 	int ret;
 	unsigned char buf[64];
 
 	buf[0] = (port == 0 ? USBIO_WRITE_PORT0 : USBIO_WRITE_PORT1);
 	buf[1] = *data;
-	buf[7] = seq;
+	buf[7] = seqno;
 
 	ret = write(fd, buf, 8);
 	if (ret == -1)
@@ -154,7 +156,7 @@ usbio_write1(int fd, int port, unsigned char *data) {
 			err(1, "read");
 		if (ret == 0)
 			break;
-		if (buf[7] == seq) {
+		if (buf[7] == seqno) {
 			DPRINTF("read : %02x:%02x %02x %02x %02x %02x %02x:%02x\n",
 				buf[0], buf[1], buf[2], buf[3],
 				buf[4], buf[5], buf[6], buf[7]);
@@ -162,7 +164,7 @@ usbio_write1(int fd, int port, unsigned char *data) {
 		}
 	}
 
-	seq++;
+	seqno++;
 	return ret;
 }
 
@@ -171,7 +173,6 @@ usbio_write1(int fd, int port, unsigned char *data) {
  */
 int
 usbio_write2(int fd, int port, unsigned char *data) {
-	static unsigned char seq = 0;
 	int ret;
 	unsigned char buf[64];
 
@@ -179,7 +180,7 @@ usbio_write2(int fd, int port, unsigned char *data) {
 	buf[1] = (unsigned char)(port + 1);
 	buf[2] = *data;
 	buf[3] = buf[4] = buf[5] = buf[6] = buf[7] = buf[8] = 0;
-	buf[63] = seq;
+	buf[63] = seqno;
 
 	ret = write(fd, buf, 64);
 	if (ret == -1)
@@ -197,7 +198,7 @@ usbio_write2(int fd, int port, unsigned char *data) {
 			err(1, "read");
 		if (ret == 0)
 			break;
-		if (buf[63] == seq) {
+		if (buf[63] == seqno) {
 			DPRINTF("read : %02x:%02x %02x %02x %02x"
 				" %02x %02x %02x %02x:%02x\n",
 				buf[0], buf[1], buf[2], buf[3], buf[4],
@@ -206,7 +207,7 @@ usbio_write2(int fd, int port, unsigned char *data) {
 		}
 	}
 
-	seq++;
+	seqno++;
 	return ret;
 }
 
