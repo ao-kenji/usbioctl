@@ -117,58 +117,13 @@ usbio_open(void) {
  * protocol version 2
  */
 int
-usbio_read2(int fd) {
-	int ret, count;
-	unsigned char buf[64];
-
-	memset(buf, 0x00, sizeof(buf));
-	buf[0] = USBIO2_RW;
-	buf[63] = seqno;
-
-	ret = write(fd, buf, 64);
-	if (ret == -1)
-		err(1, "write");
-	else if (ret != 0) {
-		DPRINTF("write: %02x:%02x %02x %02x %02x"
-			" %02x %02x %02x %02x:%02x\n",
-			buf[0], buf[1], buf[2], buf[3], buf[4],
-			buf[5], buf[6], buf[7], buf[8], buf[63]);
-	}
-
-	count = 0;
-	for(;;) {
-		ret = read(fd, buf, 64);
-		count++;
-		if (ret == -1)
-			err(1, "read");
-		if (ret == 0)
-			break;
-		if (buf[63] == seqno) {
-			DPRINTF("read : %02x:%02x %02x %02x %02x"
-				" %02x %02x %02x %02x:%02x\n",
-				buf[0], buf[1], buf[2], buf[3], buf[4],
-				buf[5], buf[6], buf[7], buf[8], buf[63]);
-			DPRINTF("read : count = %d\n", count);
-			break;
-		}
-		if (count > 10000) {
-			DPRINTF("read : timeout, count = %d\n", count);
-			break;
-		}
-	}
-
-	seqno++;
-	return ret;
-}
-
-int
 usbio_write2(int fd, int port, unsigned char *data) {
 	int ret, count;
 	unsigned char buf[64];
 
 	memset(buf, 0x00, sizeof(buf));
 	buf[0] = USBIO2_RW;
-	buf[1] = (unsigned char)(port + 1);
+	buf[1] = (unsigned char)port;
 	buf[2] = *data;
 	buf[63] = seqno;
 
@@ -204,7 +159,7 @@ usbio_write2(int fd, int port, unsigned char *data) {
 	return ret;
 }
 
-int port = 1;
+int port = 2;
 
 /*
  * main
@@ -243,19 +198,17 @@ main(int argc, char *argv[]) {
 			DPRINTF("\n");
 	}
 
-#if 0
-	/* read */
-	usbio_read2(fd);
-#endif
-
 	/* write */
-	data = data & USBIO_PORT2_MASK;
+	if (port == 2)
+		data = data & USBIO_PORT2_MASK;
 	usbio_write2(fd, port, &data);
 
 	sleep(3);	/* wait for 3 second */
 
+	data = 0x00;
 	/* write again */
-	data = 0x00 & USBIO_PORT2_MASK;
+	if (port == 2)
+		data = data & USBIO_PORT2_MASK;
 	usbio_write2(fd, port, &data);
 
 	close(fd);
