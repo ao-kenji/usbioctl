@@ -21,7 +21,7 @@
 #include <err.h>	/* err() */
 #include <fcntl.h>	/* open() */
 #include <stdio.h>
-#include <stdlib.h>	/* atoi() */
+#include <stdlib.h>	/* atoi(), strtol() */
 #include <string.h>	/* memset() */
 #include <unistd.h>	/* close(), getopt(), read(), write() */
 
@@ -216,10 +216,8 @@ main(int argc, char *argv[]) {
 	argc -= optind;
 	argv += optind;
 
-	if (argc != 1)
+	if (argc < 1)
 		usage();	/* not return */
-
-	data = (unsigned char)atoi(argv[0]);	/* XXX: error check! */
 
 	if (f_flag) {
 		fd = usbio_open(devname);
@@ -252,18 +250,20 @@ main(int argc, char *argv[]) {
 	}
 #endif
 
-	/* write */
-	if (port == 2)
-		data = data & USBIO_PORT2_MASK;
-	usbio_write2(fd, port, &data);
+	for (i = 0; i < argc; i++) {
+		val = (int)strtol(argv[i], (char **)NULL, 16);
+		if ((val < 0) || (val > 255)) {
+			fprintf(stderr, "data %d: value = %d, out of range\n",
+				i, val);
+			exit(1);
+		}
+		data = (char)val;
+		if (port == 2)
+			data = data & USBIO_PORT2_MASK;
+		usbio_write2(fd, port, &data);
 
-	sleep(3);	/* wait for 3 second */
-
-	data = 0x00;
-	/* write again */
-	if (port == 2)
-		data = data & USBIO_PORT2_MASK;
-	usbio_write2(fd, port, &data);
+		sleep(3);	/* wait for 3 second */
+	}
 
 	close(fd);
 	exit(0);
@@ -271,7 +271,7 @@ main(int argc, char *argv[]) {
 
 __dead void
 usage(void) {
-	fprintf(stderr, "Usage: %s [-f device] [-p port] value\n",
+	fprintf(stderr, "Usage: %s [-f device] [-p port] value [value ...]\n",
 		getprogname());
 	fprintf(stderr, "	Default port = %d\n", DEFAULT_PORT);
 	exit(2);
