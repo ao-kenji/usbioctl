@@ -36,7 +36,10 @@
 
 #define USBIO_PORT2_MASK	0x0f
 
+#if 0
 #define DEBUG
+#endif
+
 #ifdef DEBUG
 #define DPRINTF(...)	do { fprintf(stderr, __VA_ARGS__); } while (0)
 #else
