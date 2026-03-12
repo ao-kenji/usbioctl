@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Kenji Aoyama <aoyama@nk-home.net>
+ * Copyright (c) 2020, 2026 Kenji Aoyama
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,14 +27,23 @@
 
 #include <dev/usb/usb.h>
 
-#define	DEFAULT_PORT	2
+#define DEFAULT_PORT		2
+#define USBIO_PORT2_MASK	0x0f
+
+/*
+ * USB-IO(1.0) commands (not complete list)
+ */
+#define USBIO1_P0_W		0x01
+#define USBIO1_P1_W		0x02
+#if 0	/* not implemented yet */
+#define USBIO1_P0_R		0x03
+#define USBIO1_P1_R		0x04
+#endif
 
 /*
  * USB-IO(2.0) commands (not complete list)
  */
 #define USBIO2_RW		0x20
-
-#define USBIO_PORT2_MASK	0x0f
 
 #if 0
 #define DEBUG
@@ -52,27 +61,27 @@ struct {
 	uint16_t	product;
 	int		protocol_version;	/* 1 or 2 */
 } usbio_models [] = {
-#if 0	/* not supported yet */
 	0x0bfe, 0x1003, 1,	/* Morphy Planning USB-IO 1.0 */
 	0x1352, 0x0100, 1,	/* Km2Net USB-IO 1.0 */
-#endif
 	0x1352, 0x0120, 2,	/* Km2Net USB-IO 2.0 */
 	0x1352, 0x0121, 2,	/* Km2Net USB-IO 2.0(AKI) */
 };
 
 /* global variables */
 unsigned char seqno = 0;
+int version;
 
 /* prototypes */
 int	usbio_check(int);
 int	usbio_lookup(void);
 int	usbio_open(const char *);
+int	usbio_write1(int, int, unsigned char *);
 int	usbio_write2(int, int, unsigned char *);
 void	usage(void);
 
 /*
  * check vendor/product IDs on an opened file descriptor
- *   return its protocol version (currently 2 only) if found
+ *   return its protocol version if found
  *   return -1 if not found
  */
 int
@@ -105,7 +114,8 @@ usbio_open(const char *devname) {
 
 	fd = open(devname, O_RDWR);
 	if (fd != -1) {
-		if (usbio_check(fd) != -1)
+		version = usbio_check(fd);
+		if (version != -1)
 			return fd;
 		close(fd);
 	}
@@ -132,6 +142,39 @@ usbio_lookup(void) {
 	/* exit if we can not find */
 	fprintf(stderr, "can not find/open USB-IO device\n");
 	exit(1);
+}
+
+/*
+ * write: protocol version 1
+ */
+int
+usbio_write1(int fd, int port, unsigned char *data) {
+	int ret, count;
+	unsigned char buf[8];
+
+	memset(buf, 0x00, sizeof(buf));
+
+	if (port == 1)
+		buf[0] = USBIO1_P0_W;
+	else if (port == 2)
+		buf[0] = USBIO1_P1_W;
+
+	buf[1] = (unsigned char)port;
+	buf[2] = *data;
+	buf[7] = seqno;
+
+	ret = write(fd, buf, 8);
+	if (ret == -1)
+		err(1, "write");
+	else if (ret != 0) {
+		DPRINTF("write: %02x:%02x %02x %02x"
+			" %02x %02x %02x:%02x\n",
+			buf[0], buf[1], buf[2], buf[3],
+			buf[4], buf[5], buf[6], buf[7]);
+	}
+
+	seqno++;
+	return ret;
 }
 
 /*
@@ -263,7 +306,11 @@ main(int argc, char *argv[]) {
 		data = (char)val;
 		if (port == 2)
 			data = data & USBIO_PORT2_MASK;
-		usbio_write2(fd, port, &data);
+
+		if (version == 1)
+			usbio_write1(fd, port, &data);
+		else if (version == 2)
+			usbio_write2(fd, port, &data);
 
 		sleep(3);	/* wait for 3 second */
 	}
